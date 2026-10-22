@@ -8,11 +8,11 @@ import json
 import logging
 from pathlib import Path
 import secrets
+import sqlite3
 import threading
 from typing import Any
 from uuid import uuid4
 
-from deeptutor.services.file_io import atomic_write_text
 from deeptutor.utils.secret_files import write_secret_text
 
 from .book_permission import (
@@ -27,14 +27,13 @@ from .paths import PROJECT_ROOT, SYSTEM_ROOT, migrate_legacy_multi_user_tree
 
 logger = logging.getLogger(__name__)
 
-# Serialises writes to USERS_FILE so a concurrent burst of /register requests
-# cannot all see ``not users`` and each promote themselves to admin. Single-
-# process FastAPI deployments (the ``deeptutor start`` launcher) are fully covered;
-# multi-worker deployments still race and must rely on an external user store
-# (e.g. PocketBase), which is documented in the multi-user README.
-_USERS_WRITE_LOCK = threading.Lock()
+# Serializes identity-store read/modify/write operations within this process.
+# SQLite transactions additionally serialize database writes across processes.
+_USERS_WRITE_LOCK = threading.RLock()
 
 AUTH_DIR = SYSTEM_ROOT / "auth"
+USERS_DB = AUTH_DIR / "auth.db"
+# Compatibility constant; user records are stored in SQLite.
 USERS_FILE = AUTH_DIR / "users.json"
 SECRET_FILE = AUTH_DIR / "auth_secret"
 LEGACY_USERS_FILE = PROJECT_ROOT / "data" / "user" / "auth_users.json"
@@ -98,13 +97,82 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _connect_users_db() -> sqlite3.Connection:
+    """Open the SQLite identity database and ensure its schema exists."""
+    AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(USERS_DB, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            id TEXT NOT NULL UNIQUE,
+            hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at TEXT NOT NULL DEFAULT '',
+            disabled INTEGER NOT NULL DEFAULT 0,
+            avatar TEXT NOT NULL DEFAULT '',
+            preset TEXT NOT NULL DEFAULT 'standard',
+            book_permission TEXT,
+            learner_profile TEXT
+        )
+    """)
+    return conn
+
+
+def _has_users() -> bool:
+    with _connect_users_db() as conn:
+        return conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
+
+
+def _db_read_users() -> dict[str, dict[str, Any]]:
+    with _connect_users_db() as conn:
+        rows = conn.execute("SELECT * FROM users ORDER BY rowid").fetchall()
+    users: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        record: dict[str, Any] = {
+            "id": row["id"], "hash": row["hash"], "role": row["role"],
+            "created_at": row["created_at"], "disabled": bool(row["disabled"]),
+            "avatar": row["avatar"], "preset": row["preset"],
+        }
+        if row["book_permission"] is not None:
+            record["book_permission"] = json.loads(row["book_permission"])
+        if row["learner_profile"] is not None:
+            record["learner_profile"] = json.loads(row["learner_profile"])
+        users[row["username"]] = record
+    return users
+
+
 def _write_users(users: dict[str, dict[str, Any]]) -> None:
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(USERS_FILE, json.dumps(users, indent=2, ensure_ascii=False))
+    """Persist canonical user records to SQLite in a single transaction."""
+    with _USERS_WRITE_LOCK:
+        with _connect_users_db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM users")
+            for username, record in users.items():
+                conn.execute(
+                    """INSERT INTO users (
+                        username, id, hash, role, created_at, disabled,
+                        avatar, preset, book_permission, learner_profile
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        username, str(record.get("id") or new_user_id()),
+                        str(record.get("hash") or ""),
+                        str(record.get("role") or "user"),
+                        str(record.get("created_at") or ""),
+                        int(bool(record.get("disabled", False))),
+                        str(record.get("avatar") or ""),
+                        str(record.get("preset") or "standard"),
+                        json.dumps(record["book_permission"], ensure_ascii=False)
+                        if "book_permission" in record else None,
+                        json.dumps(record["learner_profile"], ensure_ascii=False)
+                        if "learner_profile" in record else None,
+                    ),
+                )
 
 
 def _migrate_legacy_users() -> dict[str, dict[str, Any]] | None:
-    if USERS_FILE.exists() or not LEGACY_USERS_FILE.exists():
+    if _has_users() or not LEGACY_USERS_FILE.exists():
         return None
     legacy = _read_json(LEGACY_USERS_FILE)
     users: dict[str, dict[str, Any]] = {}
@@ -117,7 +185,7 @@ def _migrate_legacy_users() -> dict[str, dict[str, Any]] | None:
             users[str(username)] = record
     if users:
         _write_users(users)
-        logger.info("Migrated auth users from %s to %s", LEGACY_USERS_FILE, USERS_FILE)
+        logger.info("Migrated auth users from %s to %s", LEGACY_USERS_FILE, USERS_DB)
         return users
     return None
 
@@ -173,21 +241,16 @@ def _env_admin_record(password_hash: str) -> dict[str, Any]:
     }
 
 
-def load_users(  # nosec B107 - empty defaults mean "no env fallback supplied".
+def load_users(
     env_username: str = "",
     env_password_hash: str = "",
 ) -> dict[str, dict[str, Any]]:
-    """Load canonical users, migrating legacy records and env fallback in memory."""
+    """Load canonical users from SQLite, migrating legacy JSON once if needed."""
     migrate_legacy_multi_user_tree()
-    users: dict[str, dict[str, Any]] | None = None
-    if USERS_FILE.exists():
-        users = _read_json(USERS_FILE)
-    else:
-        users = _migrate_legacy_users()
+    if not _has_users():
+        _migrate_legacy_users()
 
-    if users is None:
-        users = {}
-
+    users = _db_read_users()
     canonical: dict[str, dict[str, Any]] = {}
     changed = False
     for index, (username, value) in enumerate(users.items()):
@@ -201,22 +264,14 @@ def load_users(  # nosec B107 - empty defaults mean "no env fallback supplied".
         canonical[str(username)] = record
         changed = changed or record != value
 
-    if USERS_FILE.exists() and changed:
+    if changed:
         _write_users(canonical)
 
-    # The bootstrap admin is merged in whenever it is configured, not only when
-    # the store is empty. Falling back to it only for an empty store locked the
-    # operator who bootstrapped the deployment out of their own instance the
-    # moment the first real account was written (#849). A stored record with the
-    # same username wins, so the account can later be adopted into the store.
-    # The merge is deliberately in-memory only; no write path passes the env
-    # arguments, so the bootstrap hash is never persisted into ``users.json``
-    # where a rotation of ``auth.json`` could no longer supersede it.
+    # The configured bootstrap admin is an in-memory overlay only.
     if env_username and env_password_hash and env_username not in canonical:
         merged = {env_username: _env_admin_record(env_password_hash)}
         merged.update(canonical)
         return merged
-
     return canonical
 
 
@@ -226,7 +281,6 @@ def save_user(
     role: Role = "user",
     preset: AccountPreset = "standard",
 ) -> dict[str, Any]:
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     # Read-modify-write must be atomic so concurrent first-time registrations
     # cannot each see an empty store and each promote themselves to admin.
     with _USERS_WRITE_LOCK:
@@ -320,7 +374,7 @@ def set_learner_profile(username: str, profile: dict[str, Any] | None) -> dict[s
 def set_book_permission(username: str, permission: BookPermission) -> bool:
     """Atomically replace one ordinary user's shared-book permission."""
 
-    if not USERS_FILE.exists():
+    if not _has_users():
         return False
     with _USERS_WRITE_LOCK:
         users = load_users()
@@ -338,7 +392,7 @@ def remove_book_permission_overrides(book_id: str) -> list[str]:
     Returns affected user ids for the deletion audit summary.
     """
 
-    if not USERS_FILE.exists():
+    if not _has_users():
         return []
     affected: list[str] = []
     with _USERS_WRITE_LOCK:
@@ -365,7 +419,7 @@ def remove_book_permission_overrides(book_id: str) -> list[str]:
 
 
 def delete_user(username: str) -> bool:
-    if not USERS_FILE.exists():
+    if not _has_users():
         return False
     with _USERS_WRITE_LOCK:
         users = load_users()
@@ -388,7 +442,7 @@ def delete_user(username: str) -> bool:
 
 def set_password(username: str, hashed_password: str) -> dict[str, Any] | None:
     """Replace one account's password hash without changing its identity fields."""
-    if not USERS_FILE.exists():
+    if not _has_users():
         return None
     with _USERS_WRITE_LOCK:
         users = load_users()
@@ -402,7 +456,7 @@ def set_password(username: str, hashed_password: str) -> dict[str, Any] | None:
 
 def set_avatar(username: str, avatar: str) -> bool:
     """Update the avatar marker for an existing user. Returns True on success."""
-    if not USERS_FILE.exists():
+    if not _has_users():
         return False
     with _USERS_WRITE_LOCK:
         users = load_users()
@@ -461,7 +515,7 @@ def delete_avatar_file(user_id: str) -> None:
 def set_role(username: str, role: Role) -> bool:
     if role not in VALID_ROLES:
         raise ValueError(f"role must be one of {sorted(VALID_ROLES)}")
-    if not USERS_FILE.exists():
+    if not _has_users():
         return False
     users = load_users()
     if username not in users:
@@ -477,7 +531,7 @@ def set_preset(
     """Update an account's configuration preset without changing its role."""
     if preset not in {"standard", "learner", "custom"}:
         raise ValueError("preset must be 'standard', 'learner', or 'custom'")
-    if not USERS_FILE.exists():
+    if not _has_users():
         return False
     with _USERS_WRITE_LOCK:
         users = load_users()
