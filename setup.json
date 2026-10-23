@@ -1,0 +1,11 @@
+{
+  "llm": {
+    "provider": "openai",
+    "model": "model_1014",
+    "api_key_env": "OPENAI_API_KEY"
+  },
+  "system": {
+    "backend_port": 8001,
+    "frontend_port": 3782
+  }
+}

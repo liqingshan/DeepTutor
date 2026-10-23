@@ -31,14 +31,12 @@ import {
   ShieldOff,
   Trash2,
   RefreshCw,
-  ArrowLeft,
   SlidersHorizontal,
   Upload,
   UserPlus,
   Users,
   X,
 } from "lucide-react";
-import Link from "next/link";
 import { formatDate as formatLocaleDate, type Language } from "@/lib/datetime";
 
 // Delegates to the shared locale mapping so a new UI language only has to be
@@ -297,18 +295,11 @@ export default function AdminUsersPage() {
     );
 
   return (
-    <div className="h-screen overflow-y-auto bg-[var(--background)] px-4 py-10 [scrollbar-gutter:stable]">
-      <div className="mx-auto max-w-3xl">
+    <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+      <div>
         {/* Header */}
         <div className="mb-8">
-          <Link
-            href="/"
-            className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
-          >
-            <ArrowLeft size={16} />
-            {t("Back")}
-          </Link>
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h1 className="font-serif text-xl font-semibold text-[var(--foreground)]">
                 {t("User Management")}
@@ -317,7 +308,7 @@ export default function AdminUsersPage() {
                 {t("Manage registered accounts")}
               </p>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <button
                 onClick={openCreateDialog}
                 className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
@@ -414,7 +405,7 @@ export default function AdminUsersPage() {
           </div>
         )}
 
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+        <div className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
           {loading ? (
             <div className="divide-y divide-[var(--border)]" aria-hidden>
               {[0, 1, 2].map((row) => (
@@ -478,7 +469,7 @@ export default function AdminUsersPage() {
               </button>
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[680px] text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-xs text-[var(--muted-foreground)] uppercase tracking-wider">
                   <th className="w-12 px-5 py-3">
