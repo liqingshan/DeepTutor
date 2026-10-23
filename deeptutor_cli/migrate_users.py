@@ -90,8 +90,7 @@ def migrate_users(
         insert_sql = """
             INSERT INTO users (
                 username, id, hash, role, created_at, disabled,
-                avatar, preset, book_permission, learner_profile,
-                profile_json
+                avatar, preset, book_permission, learner_profile
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
@@ -101,8 +100,7 @@ def migrate_users(
             insert_sql = """
                 INSERT INTO users (
                     username, id, hash, role, created_at, disabled,
-                    avatar, preset, book_permission, learner_profile,
-                    profile_json
+                    avatar, preset, book_permission, learner_profile
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(username) DO UPDATE SET
                     id = excluded.id,
@@ -113,8 +111,7 @@ def migrate_users(
                     avatar = excluded.avatar,
                     preset = excluded.preset,
                     book_permission = excluded.book_permission,
-                    learner_profile = excluded.learner_profile,
-                    profile_json = excluded.profile_json
+                    learner_profile = excluded.learner_profile
             """
 
         with conn:
@@ -146,11 +143,6 @@ def migrate_users(
                             )
                             if learner_profile is not None
                             else None
-                        ),
-                        json.dumps(
-                            user,
-                            ensure_ascii=False,
-                            separators=(",", ":"),
                         ),
                     ),
                 )
