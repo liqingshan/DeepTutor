@@ -7,6 +7,7 @@ import {
   ArrowRight,
   BookOpen,
   GraduationCap,
+  KeyRound,
   Pencil,
   Plus,
   ShieldCheck,
@@ -229,6 +230,15 @@ export default function AdminRolesPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {can("admin.roles.read") && (
+            <Link
+              href="/admin/permissions"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--foreground)] transition-colors hover:bg-[var(--card)]"
+            >
+              <KeyRound size={14} />
+              {t("Permission Management")}
+            </Link>
+          )}
           {can("admin.users.read") && (
             <Link
               href="/admin/users"

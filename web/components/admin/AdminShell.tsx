@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
+  KeyRound,
   Menu,
   ShieldCheck,
   Users,
@@ -35,6 +36,12 @@ const ADMIN_NAV: readonly AdminNavItem[] = [
     labelKey: "Role Management",
     permission: "admin.roles.read",
     icon: ShieldCheck,
+  },
+  {
+    href: "/admin/permissions",
+    labelKey: "Permission Management",
+    permission: "admin.roles.read",
+    icon: KeyRound,
   },
 ];
 
