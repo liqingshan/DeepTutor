@@ -53,7 +53,9 @@ export default function SoulPicker({
 }) {
   const { t } = useTranslation();
   // The soul library is shared deployment-wide; only an admin may add to it.
-  const { isAdmin } = useAuthStatus();
+  const { isAdmin, permissions } = useAuthStatus();
+  const canManageSouls =
+    isAdmin || Boolean(permissions?.includes("admin.resources.write"));
   const [sources, setSources] = useState<SoulSources | null>(null);
   const [tab, setTab] = useState<SourceTab>(
     value.source === "persona"
@@ -233,7 +235,7 @@ export default function SoulPicker({
         </div>
       )}
 
-      {isAdmin && tab === "custom" && (value.content ?? "").trim() && (
+      {canManageSouls && tab === "custom" && (value.content ?? "").trim() && (
         <div className="flex flex-wrap items-center gap-2">
           <input
             value={saveName}

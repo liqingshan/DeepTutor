@@ -26,12 +26,16 @@ export function settingsAccessFromAuthStatus(
     return { ...PENDING_SETTINGS_ACCESS, resolved: true };
   }
 
+  const canManageSettings = Boolean(
+    authStatus.is_admin ||
+      authStatus.permissions?.includes("admin.settings.manage"),
+  );
   const ordinaryAuthenticatedUser = Boolean(
-    authStatus.enabled && authStatus.authenticated && !authStatus.is_admin,
+    authStatus.enabled && authStatus.authenticated && !canManageSettings,
   );
   return {
     resolved: true,
-    hideAdminOnly: Boolean(authStatus.enabled) && !authStatus.is_admin,
+    hideAdminOnly: Boolean(authStatus.enabled) && !canManageSettings,
     showLearnerOnly:
       ordinaryAuthenticatedUser && authStatus.preset === "learner",
     showGuardianOnly:

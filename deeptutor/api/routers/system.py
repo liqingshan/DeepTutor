@@ -17,8 +17,9 @@ from deeptutor.api.contracts.turn_protocol import (
     PROTOCOL_VERSION,
     RuntimeStatus,
 )
-from deeptutor.api.routers.auth import require_admin
+from deeptutor.api.routers.auth import require_permission
 from deeptutor.multi_user.context import get_current_user
+from deeptutor.multi_user.roles import role_has_permission
 from deeptutor.runtime import memory_probe
 from deeptutor.services.app_update import (
     SYSTEMD_UPDATE_REASON,
@@ -115,7 +116,7 @@ def get_turn_activity():
 
 @router.get(
     "/runtime",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_permission("admin.system.manage"))],
     response_model=RuntimeStatus,
 )
 async def get_runtime_status(request: Request) -> RuntimeStatus:
@@ -196,7 +197,9 @@ def _update_payload(
             "reason": installation.reason,
         },
         "launcher_managed": launcher_available(),
-        "is_admin": get_current_user().is_admin,
+        "is_admin": role_has_permission(
+            get_current_user().role, "admin.system.manage"
+        ),
         "job": _job_payload(_stored_job(store)),
     }
 
@@ -240,14 +243,14 @@ async def get_update_status() -> dict[str, Any]:
     return await _checked_update_payload()
 
 
-@router.post("/update/check", dependencies=[Depends(require_admin)])
+@router.post("/update/check", dependencies=[Depends(require_permission("admin.system.manage"))])
 async def check_for_update() -> dict[str, Any]:
     """Perform an explicit administrator-requested release check."""
 
     return await _checked_update_payload(force=True)
 
 
-@router.put("/update/settings", dependencies=[Depends(require_admin)])
+@router.put("/update/settings", dependencies=[Depends(require_permission("admin.system.manage"))])
 async def update_check_settings(payload: UpdateSettingsRequest) -> dict[str, Any]:
     service = get_runtime_settings_service()
     current = service.load_system(include_process_overrides=False)
@@ -263,7 +266,7 @@ async def get_update_job() -> dict[str, Any] | None:
 @router.post(
     "/update",
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_permission("admin.system.manage"))],
 )
 async def request_managed_update(_request: ManagedUpdateRequest) -> dict[str, Any]:
     """Reserve one safe update for the supervising launcher to apply."""
@@ -394,7 +397,9 @@ async def get_system_status():
     # Non-admin users have no need to know which model the admin configured;
     # exposing the name leaks operational detail and would let curious users
     # fingerprint the deployment. Strip the identifying fields.
-    if not get_current_user().is_admin:
+    if not role_has_permission(
+        get_current_user().role, "admin.system.manage"
+    ):
         for section in ("llm", "embeddings"):
             result[section].pop("model", None)
         result["search"].pop("provider", None)
@@ -414,7 +419,9 @@ async def get_memory_usage():
     non-admins — process composition and host memory are operational detail a
     tenant has no need for.
     """
-    if not get_current_user().is_admin:
+    if not role_has_permission(
+        get_current_user().role, "admin.system.manage"
+    ):
         return {"available": False}
 
     snapshot = await asyncio.to_thread(memory_probe.capture)

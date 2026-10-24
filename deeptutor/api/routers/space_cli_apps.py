@@ -30,7 +30,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from deeptutor.api.routers.auth import require_admin
+from deeptutor.api.routers.auth import require_admin, require_permission
 from deeptutor.multi_user.paths import current_owner_id
 from deeptutor.multi_user.tool_access import allowed_cli_apps, exec_override
 from deeptutor.services.cli_apps import (
@@ -132,7 +132,7 @@ async def get_catalog(
     }
 
 
-@router.post("/catalog/{app_id}/install", dependencies=[Depends(require_admin)])
+@router.post("/catalog/{app_id}/install", dependencies=[Depends(require_admin), Depends(require_permission("admin.plugins.manage"))])
 async def install(app_id: str) -> dict[str, Any]:
     """Install one app for the deployment. Administrator only."""
     entry = get_entry(app_id)
@@ -159,7 +159,7 @@ async def install(app_id: str) -> dict[str, Any]:
     return state
 
 
-@router.delete("/apps/{app_id}", dependencies=[Depends(require_admin)])
+@router.delete("/apps/{app_id}", dependencies=[Depends(require_admin), Depends(require_permission("admin.plugins.manage"))])
 async def uninstall(app_id: str) -> dict[str, Any]:
     """Remove one app from the deployment. Administrator only."""
     from deeptutor.services.cli_apps.installer import uninstall_app

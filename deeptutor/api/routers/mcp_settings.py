@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
-from deeptutor.api.routers.auth import require_admin
+from deeptutor.api.routers.auth import require_admin, require_permission
 from deeptutor.services.i18n import t
 from deeptutor.services.mcp import (
     MCPConfig,
@@ -31,7 +31,12 @@ from deeptutor.services.mcp import (
 )
 from deeptutor.services.mcp.manager import probe_server
 
-router = APIRouter(dependencies=[Depends(require_admin)])
+router = APIRouter(
+    dependencies=[
+        Depends(require_admin),
+        Depends(require_permission("admin.settings.manage")),
+    ]
+)
 
 
 class MCPSettingsPayload(BaseModel):

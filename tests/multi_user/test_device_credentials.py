@@ -362,9 +362,9 @@ def test_disabled_account_fails_closed(mu_isolated_root, monkeypatch):
 
     from deeptutor.multi_user import identity
 
-    users_on_disk = json.loads(identity.USERS_FILE.read_text(encoding="utf-8"))
+    users_on_disk = identity.load_users()
     users_on_disk["learner"]["disabled"] = True
-    identity.USERS_FILE.write_text(json.dumps(users_on_disk), encoding="utf-8")
+    identity._write_users(users_on_disk)
 
     assert (
         client.post(

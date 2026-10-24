@@ -52,6 +52,16 @@ from deeptutor.multi_user.identity import get_user_by_id
 from deeptutor.multi_user.learning_access import learning_policy_for_user
 from deeptutor.multi_user.models import AccountPreset
 from deeptutor.multi_user.paths import local_admin_user
+from deeptutor.multi_user.roles import (
+    ALL_PERMISSIONS,
+    assert_user_deletion_preserves_management,
+    assert_user_role_change_preserves_management,
+    permissions_for_role,
+    role_exists,
+    role_has_admin_permission,
+    role_has_any_permission,
+    role_name,
+)
 from deeptutor.multi_user.session_handoff import (
     CODE_LIFETIME_SECONDS,
     TICKET_LIFETIME_SECONDS,
@@ -265,13 +275,10 @@ class SetRoleRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def role_valid(cls, v: str) -> str:
-        # Validate against the same whitelist the identity store enforces so
-        # the API layer and the storage layer share a single source of truth;
-        # a hardcoded subset here would 422 roles the store itself accepts.
-        from deeptutor.multi_user.models import VALID_ROLES
-
-        if v not in VALID_ROLES:
-            raise ValueError(f"Role must be one of {sorted(VALID_ROLES)}")
+        # Validate against the role store so built-in and custom roles share a
+        # single source of truth instead of a hardcoded subset.
+        if not role_exists(v):
+            raise ValueError("Unknown role")
         return v
 
 
@@ -312,6 +319,8 @@ class AuthStatusResponse(BaseModel):
     user_id: str | None = None
     username: str | None = None
     role: str | None = None
+    role_name: str | None = None
+    permissions: list[str] = Field(default_factory=list)
     is_admin: bool = False
     avatar: str = ""
     preset: AccountPreset | None = None
@@ -324,6 +333,7 @@ class UserInfo(BaseModel):
     id: str = ""
     username: str
     role: str
+    role_name: str = ""
     created_at: str
     disabled: bool = False
     avatar: str = ""
@@ -576,23 +586,54 @@ async def ws_require_auth(ws: WebSocket) -> _CtxToken | _WsAuthFailed:
     return user_token
 
 
+def _permission_denied(required: tuple[str, ...]) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Requires permission: {', '.join(required)}",
+    )
+
+
+def require_permission(*required: str):
+    """Build a dependency that requires at least one of *required*.
+
+    Roles carry permissions (see ``multi_user.roles``); a custom role is
+    therefore enough to reach the admin APIs it was granted, without becoming
+    the built-in ``admin`` account. The legacy ``require_admin`` dependency is
+    the outer gate, which keeps existing dependency overrides (tests and
+    embedding applications) working while the specific permission is checked
+    here.
+    """
+
+    async def dependency(
+        payload: TokenPayload | None = Depends(require_admin),
+    ) -> TokenPayload | None:
+        role = getattr(payload, "role", None)
+        if role is None:
+            # A dependency override supplied a sentinel rather than a token.
+            return payload
+        if not role_has_any_permission(str(role), required):
+            raise _permission_denied(tuple(required))
+        return payload
+
+    return dependency
+
+
 async def require_admin(
     payload: TokenPayload | None = Depends(require_auth),
 ) -> TokenPayload:
     """
-    FastAPI dependency that requires the caller to be an admin.
+    FastAPI dependency that requires at least one admin-console permission.
 
-    Raises HTTP 403 if the authenticated user is not an admin.
+    A custom role granted e.g. ``admin.users.read`` passes this legacy guard;
+    routes that need a specific capability should use
+    ``require_permission(...)`` instead.
+
     When AUTH_ENABLED=false, all requests are treated as admin.
-
-    ``async def`` mirrors ``require_auth`` so the dependency chain stays on
-    the event loop and the user ContextVar set by ``require_auth`` is visible
-    to the endpoint.
     """
     if not AUTH_ENABLED:
         return _local_admin_token_payload()
 
-    if payload is None or payload.role != "admin":
+    if payload is None or not role_has_admin_permission(payload.role):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
@@ -797,6 +838,8 @@ async def auth_status(
             user_id="local-admin",
             username="local",
             role="admin",
+            role_name="Admin",
+            permissions=sorted(ALL_PERMISSIONS),
             is_admin=True,
             preset="standard",
         )
@@ -806,7 +849,11 @@ async def auth_status(
     avatar = ""
     preset: AccountPreset | None = None
     learning_policy = None
+    permissions: list[str] = []
+    resolved_role_name: str | None = None
     if payload is not None:
+        permissions = sorted(permissions_for_role(payload.role))
+        resolved_role_name = role_name(payload.role)
         info = get_user_info(payload.username)
         if info:
             avatar = str(info.get("avatar") or "")
@@ -832,6 +879,8 @@ async def auth_status(
         user_id=payload.user_id if payload else None,
         username=payload.username if payload else None,
         role=payload.role if payload else None,
+        role_name=resolved_role_name,
+        permissions=permissions,
         is_admin=payload.role == "admin" if payload else False,
         avatar=avatar,
         preset=preset,
@@ -1413,7 +1462,7 @@ async def get_avatar_image(
 async def list_devices(
     user_id: str | None = None,
     include_revoked: bool = False,
-    _: TokenPayload = Depends(require_admin),
+    _: TokenPayload = Depends(require_permission("admin.users.read")),
 ) -> dict:
     """List local device credential metadata without credential secrets."""
 
@@ -1430,7 +1479,7 @@ async def list_devices(
 @router.post("/devices", status_code=status.HTTP_201_CREATED)
 async def issue_device(
     body: DeviceCredentialCreateRequest,
-    current: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_permission("admin.users.write")),
 ) -> dict:
     """Issue a revocable device credential for an ordinary local account."""
 
@@ -1470,7 +1519,7 @@ async def issue_device(
 @router.delete("/devices/{device_credential_id}")
 async def revoke_device(
     device_credential_id: str,
-    current: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_permission("admin.users.write")),
 ) -> dict:
     _require_builtin_device_auth()
     device = revoke_device_credential(
@@ -1491,8 +1540,10 @@ async def revoke_device(
 
 
 @router.get("/users", response_model=list[UserInfo])
-async def get_users(_: TokenPayload = Depends(require_admin)) -> list[UserInfo]:
-    """List all registered users. Requires admin role."""
+async def get_users(
+    _: TokenPayload = Depends(require_permission("admin.users.read")),
+) -> list[UserInfo]:
+    """List all registered users. Requires read access to accounts."""
     return [UserInfo(**u) for u in list_users()]
 
 
@@ -1547,7 +1598,10 @@ async def put_current_learner_profile(
 
 
 @router.get("/users/{username}/learner-profile")
-async def get_learner_profile(username: str, _: TokenPayload = Depends(require_admin)) -> dict:
+async def get_learner_profile(
+    username: str,
+    _: TokenPayload = Depends(require_permission("admin.resources.read")),
+) -> dict:
     """Return the structured profile managed for an ordinary learner."""
     from deeptutor.multi_user.identity import get_user
 
@@ -1565,7 +1619,7 @@ async def get_learner_profile(username: str, _: TokenPayload = Depends(require_a
 async def put_learner_profile(
     username: str,
     body: LearnerProfileRequest,
-    current: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_permission("admin.resources.write")),
 ) -> dict:
     from deeptutor.multi_user.identity import get_user
     from deeptutor.multi_user.learner_profile import normalize_profile
@@ -1693,7 +1747,7 @@ def _create_admin_user(
 @router.post("/users", status_code=status.HTTP_201_CREATED)
 async def admin_create_user(
     body: AdminCreateUserRequest,
-    current: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_permission("admin.users.write")),
 ) -> dict:
     """Admin-only: create one ordinary user account."""
     if not AUTH_ENABLED:
@@ -1707,7 +1761,7 @@ async def admin_create_user(
 @router.post("/users/import")
 async def admin_import_users(
     file: UploadFile = File(...),
-    current: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_permission("admin.users.write")),
 ) -> dict:
     """Admin-only: provision ordinary users from a CSV file.
 
@@ -1829,6 +1883,11 @@ def _delete_admin_user(username: str, current: TokenPayload | None) -> tuple[int
     if current and username == current.username:
         return 400, "You cannot delete your own account"
 
+    try:
+        assert_user_deletion_preserves_management(username)
+    except ValueError as exc:
+        return 409, str(exc)
+
     # Capture the id before the record disappears so the avatar file can go too.
     info = get_user_info(username)
 
@@ -1842,6 +1901,11 @@ def _delete_admin_user(username: str, current: TokenPayload | None) -> tuple[int
 
         delete_avatar_file(user_id)
 
+    log_admin_action(
+        "user_delete",
+        target_user_id=user_id or None,
+        summary={"username": username},
+    )
     actor = current.username if current else "local"
     logger.info("Admin '%s' deleted user '%s'", actor, username)
     return 200, ""
@@ -1850,7 +1914,7 @@ def _delete_admin_user(username: str, current: TokenPayload | None) -> tuple[int
 @router.delete("/users/{username}", status_code=status.HTTP_200_OK)
 async def remove_user(
     username: str,
-    current: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_permission("admin.users.write")),
 ) -> dict:
     """Delete a user. Admins cannot delete their own account."""
     status_code, detail = _delete_admin_user(username, current)
@@ -1862,7 +1926,7 @@ async def remove_user(
 @router.post("/users/batch-delete")
 async def batch_remove_users(
     body: AdminBatchDeleteRequest,
-    current: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_permission("admin.users.write")),
 ) -> dict:
     """Delete selected users and report each outcome separately."""
     results: list[dict] = []
@@ -1890,7 +1954,7 @@ async def batch_remove_users(
 async def update_user_role(
     username: str,
     body: SetRoleRequest,
-    current: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_permission("admin.roles.write")),
 ) -> dict:
     """Change a user's role. Admins cannot change their own role."""
     if current and username == current.username:
@@ -1899,11 +1963,30 @@ async def update_user_role(
             detail="You cannot change your own role",
         )
 
-    updated = set_role(username, body.role)
+    try:
+        assert_user_role_change_preserves_management(username, body.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    try:
+        updated = set_role(username, body.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    info = get_user_info(username) or {}
+    log_admin_action(
+        "role_assign",
+        target_user_id=str(info.get("id") or "") or None,
+        summary={"username": username, "role": body.role},
+    )
     logger.info(
         f"Admin '{current.username if current else 'local'}' set '{username}' role to {body.role!r}"
     )
-    return {"ok": True, "username": username, "role": body.role}
+    return {
+        "ok": True,
+        "username": username,
+        "role": body.role,
+        "role_name": str(info.get("role_name") or body.role),
+    }

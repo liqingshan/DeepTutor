@@ -12,7 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from deeptutor.api.routers.auth import AUTH_COOKIE_NAME, require_admin, require_auth
+from deeptutor.api.routers.auth import (
+    AUTH_COOKIE_NAME,
+    require_admin,
+    require_auth,
+)
+from deeptutor.multi_user.roles import role_has_any_permission
 from deeptutor.plugins.catalog import load_catalog
 from deeptutor.plugins.distribution import CatalogInstallManager, PluginDistributionError
 from deeptutor.plugins.frontend import (
@@ -59,10 +64,22 @@ async def _require_authenticated(request: Request):
     )
 
 
+async def _require_plugin_permission(payload) -> None:
+    role = getattr(payload, "role", None)
+    if role is not None and not role_has_any_permission(
+        str(role), ("admin.plugins.manage",)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Requires permission: admin.plugins.manage",
+        )
+
+
 async def _require_admin(request: Request):
-    return await require_admin(
-        payload=await _require_authenticated(request),
-    )
+    payload = await _require_authenticated(request)
+    await require_admin(payload=payload)
+    await _require_plugin_permission(payload)
+    return payload
 
 
 def _managed_records(registry: PluginRegistry) -> list[PluginRecord]:
@@ -149,6 +166,7 @@ async def _authenticate_plugin_route(request: Request) -> None:
     policy = matched[1].auth
     if policy == "admin":
         await require_admin(payload=payload)
+        await _require_plugin_permission(payload)
 
 
 async def _authenticate_plugin_page(request: Request) -> None:
@@ -163,6 +181,7 @@ async def _authenticate_plugin_page(request: Request) -> None:
     policy = matched[1].auth
     if policy == "admin":
         await require_admin(payload=payload)
+        await _require_plugin_permission(payload)
 
 
 @router.get("/extensions", dependencies=[Depends(_require_authenticated)])

@@ -98,13 +98,11 @@ def test_env_admin_is_never_written_into_the_user_store(env_admin):
     later rotation of ``auth.json`` would silently keep accepting the old
     password.
     """
-    import json
+    from deeptutor.multi_user import identity
 
-    from deeptutor.multi_user.identity import USERS_FILE, save_user
+    identity.save_user("student1", "$2b$12$placeholder", role="user")
 
-    save_user("student1", "$2b$12$placeholder", role="user")
-
-    on_disk = json.loads(USERS_FILE.read_text(encoding="utf-8"))
+    on_disk = identity.load_users()
     assert set(on_disk) == {"student1"}
 
 

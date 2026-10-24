@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { ADMIN_PERMISSION_IDS } from "@/lib/admin-permissions";
 import { fetchAuthStatus } from "@/lib/auth";
 
 export interface LearningPolicyState {
@@ -13,8 +14,12 @@ export interface AuthStatusState {
   enabled: boolean;
   /** Whether the current session is authenticated. */
   authenticated: boolean;
-  /** Whether the authenticated user is an admin. */
+  /** Whether the authenticated user has the built-in admin role. */
   isAdmin: boolean;
+  /** Display name of the current role (custom roles included). */
+  roleName: string | null;
+  /** Admin-console permissions granted to the current role. */
+  permissions: string[];
   /** Stable account id for account-scoped browser state. */
   userId: string | null;
   /** False when the runtime status endpoint could not be reached. */
@@ -27,16 +32,21 @@ export interface AuthStatusState {
    * absent instead of offered and then rejected (#1222).
    */
   learningPolicy: LearningPolicyState | null;
+  /** Whether the current role carries a permission. */
+  can: (permission: string) => boolean;
 }
 
 const INITIAL: AuthStatusState = {
   enabled: false,
   authenticated: false,
   isAdmin: false,
+  roleName: null,
+  permissions: [],
   userId: null,
   statusAvailable: false,
   loading: true,
   learningPolicy: null,
+  can: () => false,
 };
 
 function learningPolicyFromStatus(
@@ -50,6 +60,15 @@ function learningPolicyFromStatus(
   return { allowedSurfaces: surfaces.length ? surfaces : ["chat", "reading"] };
 }
 
+function permissionsFromStatus(
+  status: Awaited<ReturnType<typeof fetchAuthStatus>>,
+): string[] {
+  if (Array.isArray(status?.permissions)) return status.permissions;
+  // Older backends expose only ``is_admin``; keep the admin console usable
+  // during a rolling upgrade.
+  return status?.role === "admin" ? [...ADMIN_PERMISSION_IDS] : [];
+}
+
 /**
  * Resolve auth state at runtime from the backend (`/api/auth/status`).
  *
@@ -61,18 +80,27 @@ function learningPolicyFromStatus(
  * `deeptutor start` launcher, and source dev.
  */
 function loadAuthStatus(): Promise<AuthStatusState> {
-  return fetchAuthStatus().then((status) => ({
-    enabled: Boolean(status?.enabled),
-    authenticated: Boolean(status?.authenticated),
-    isAdmin: status?.role === "admin",
-    userId:
-      typeof status?.user_id === "string" && status.user_id.trim()
-        ? status.user_id
-        : null,
-    statusAvailable: status !== null,
-    loading: false,
-    learningPolicy: learningPolicyFromStatus(status),
-  }));
+  return fetchAuthStatus().then((status) => {
+    const permissions = permissionsFromStatus(status);
+    return {
+      enabled: Boolean(status?.enabled),
+      authenticated: Boolean(status?.authenticated),
+      isAdmin: status?.role === "admin",
+      roleName:
+        typeof status?.role_name === "string" && status.role_name.trim()
+          ? status.role_name
+          : null,
+      permissions,
+      userId:
+        typeof status?.user_id === "string" && status.user_id.trim()
+          ? status.user_id
+          : null,
+      statusAvailable: status !== null,
+      loading: false,
+      learningPolicy: learningPolicyFromStatus(status),
+      can: (permission: string) => permissions.includes(permission),
+    };
+  });
 }
 
 export function useAuthStatus(): AuthStatusState {
@@ -88,5 +116,10 @@ export function useAuthStatus(): AuthStatusState {
     };
   }, []);
 
-  return state;
+  const can = useCallback(
+    (permission: string) => state.permissions.includes(permission),
+    [state.permissions],
+  );
+
+  return { ...state, can };
 }

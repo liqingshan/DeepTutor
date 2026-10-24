@@ -8,10 +8,11 @@ import { fetchAuthStatus } from "@/lib/auth";
 import {
   deleteUsers,
   listUsers,
+  listRoles,
   deleteUser,
-  setUserRole,
   createUser,
   importUsers,
+  type RoleDefinition,
   type UserRecord,
   type AccountPreset,
   type UserImportResult,
@@ -20,19 +21,19 @@ import { GrantEditor } from "@/features/multi-user/components/GrantEditor";
 import { BookPermissionEditor } from "@/features/multi-user/components/BookPermissionEditor";
 import { LearnerProfileEditor } from "@/features/multi-user/components/LearnerProfileEditor";
 import { GuardianRelationshipsEditor } from "@/features/multi-user/components/GuardianRelationshipsEditor";
+import { RoleAssignDialog } from "@/features/multi-user/components/RoleAssignDialog";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { filterUsersByQuery } from "@/lib/admin-users";
 import { accountRoleLabelKey } from "@/lib/account-role";
 import {
   Search,
-  Shield,
   ShieldCheck,
-  ShieldOff,
   Trash2,
   RefreshCw,
   SlidersHorizontal,
   Upload,
+  UserCog,
   UserPlus,
   Users,
   X,
@@ -57,6 +58,10 @@ export default function AdminUsersPage() {
   const lang: Language = i18n.language?.startsWith("zh") ? "zh" : "en";
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [users, setUsers] = useState<UserRecord[]>([]);
+  const [roles, setRoles] = useState<RoleDefinition[]>([]);
+  const [canAssignRoles, setCanAssignRoles] = useState(false);
+  const [canManageResources, setCanManageResources] = useState(false);
+  const [canWriteUsers, setCanWriteUsers] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -68,9 +73,10 @@ export default function AdminUsersPage() {
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
   const [batchDeleteBusy, setBatchDeleteBusy] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<{
-    kind: "delete" | "promote" | "demote";
+    kind: "delete";
     user: UserRecord;
   } | null>(null);
+  const [roleTarget, setRoleTarget] = useState<UserRecord | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [createUsername, setCreateUsername] = useState("");
   const [createPassword, setCreatePassword] = useState("");
@@ -86,8 +92,12 @@ export default function AdminUsersPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await listUsers();
+      const [data, roleData] = await Promise.all([
+        listUsers(),
+        listRoles().catch(() => [] as RoleDefinition[]),
+      ]);
       setUsers(data);
+      setRoles(roleData);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("Failed to load users"));
     } finally {
@@ -101,11 +111,25 @@ export default function AdminUsersPage() {
         router.replace("/login");
         return;
       }
-      if (status.role !== "admin") {
+      const permissions = status.permissions ?? [];
+      const hasAdminAccess =
+        status.role === "admin" || permissions.length > 0;
+      if (!hasAdminAccess) {
         router.replace("/");
         return;
       }
       setCurrentUser(status.username ?? null);
+      setCanAssignRoles(
+        permissions.includes("admin.roles.write") || status.role === "admin",
+      );
+      setCanManageResources(
+        permissions.includes("admin.resources.read") ||
+          permissions.includes("admin.resources.write") ||
+          status.role === "admin",
+      );
+      setCanWriteUsers(
+        permissions.includes("admin.users.write") || status.role === "admin",
+      );
       void load();
     });
   }, [router, load]);
@@ -165,36 +189,17 @@ export default function AdminUsersPage() {
 
   async function handleConfirmAction() {
     if (!confirmTarget || confirmBusy) return;
-    const { kind, user } = confirmTarget;
+    const { user } = confirmTarget;
     setConfirmBusy(true);
     setActionError("");
     try {
-      if (kind === "delete") {
-        await deleteUser(user.username);
-        setUsers((prev) => prev.filter((u) => u.username !== user.username));
-      } else {
-        const newRole = kind === "promote" ? "admin" : "user";
-        await setUserRole(user.username, newRole);
-        setUsers((prev) =>
-          prev.map((u) =>
-            u.username === user.username ? { ...u, role: newRole } : u,
-          ),
-        );
-        if (newRole === "admin") {
-          setExpandedUserId((current) =>
-            current === user.id ? null : current,
-          );
-        }
-      }
+      await deleteUser(user.username);
+      setUsers((prev) => prev.filter((u) => u.username !== user.username));
       setConfirmTarget(null);
     } catch (e) {
       setConfirmTarget(null);
       setActionError(
-        e instanceof Error
-          ? e.message
-          : confirmTarget.kind === "delete"
-            ? t("Failed to delete user")
-            : t("Failed to update role"),
+        e instanceof Error ? e.message : t("Failed to delete user"),
       );
     } finally {
       setConfirmBusy(false);
@@ -309,24 +314,28 @@ export default function AdminUsersPage() {
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <button
-                onClick={openCreateDialog}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
-                           border border-[var(--border)] text-[var(--foreground)]
-                           hover:bg-[var(--card)] transition-colors"
-              >
-                <UserPlus size={14} />
-                {t("Add user")}
-              </button>
-              <button
-                onClick={openImportDialog}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
-                           border border-[var(--border)] text-[var(--foreground)]
-                           hover:bg-[var(--card)] transition-colors"
-              >
-                <Upload size={14} />
-                {t("Import users")}
-              </button>
+              {canWriteUsers && (
+                <>
+                  <button
+                    onClick={openCreateDialog}
+                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
+                               border border-[var(--border)] text-[var(--foreground)]
+                               hover:bg-[var(--card)] transition-colors"
+                  >
+                    <UserPlus size={14} />
+                    {t("Add user")}
+                  </button>
+                  <button
+                    onClick={openImportDialog}
+                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
+                               border border-[var(--border)] text-[var(--foreground)]
+                               hover:bg-[var(--card)] transition-colors"
+                  >
+                    <Upload size={14} />
+                    {t("Import users")}
+                  </button>
+                </>
+              )}
               <button
                 onClick={load}
                 disabled={loading}
@@ -476,7 +485,9 @@ export default function AdminUsersPage() {
                     <input
                       type="checkbox"
                       checked={allFilteredSelected}
-                      disabled={selectableFilteredUsers.length === 0}
+                      disabled={
+                        !canWriteUsers || selectableFilteredUsers.length === 0
+                      }
                       onChange={() => {
                         const displayed = new Set(
                           selectableFilteredUsers.map((user) => user.username),
@@ -508,7 +519,12 @@ export default function AdminUsersPage() {
                 {filteredUsers.map((user) => {
                   const isSelf = user.username === currentUser;
                   const isAdmin = user.role === "admin";
-                  const canManageAssignments = !isAdmin && Boolean(user.id);
+                  const builtinLabelKey = accountRoleLabelKey(user.role);
+                  const roleLabel =
+                    user.role_name ||
+                    (builtinLabelKey ? t(builtinLabelKey) : user.role);
+                  const canManageAssignments =
+                    !isAdmin && Boolean(user.id) && canManageResources;
                   return (
                     <Fragment key={user.username}>
                       <tr className="group hover:bg-[var(--background)]/50 transition-colors">
@@ -516,7 +532,7 @@ export default function AdminUsersPage() {
                           <input
                             type="checkbox"
                             checked={selectedUsernameSet.has(user.username)}
-                            disabled={isSelf}
+                            disabled={isSelf || !canWriteUsers}
                             onChange={() => toggleSelectedUsername(user.username)}
                             aria-label={t("Select {{username}}", {
                               username: user.username,
@@ -555,7 +571,7 @@ export default function AdminUsersPage() {
                             {isAdmin && (
                               <ShieldCheck size={11} strokeWidth={2} />
                             )}
-                            {t(accountRoleLabelKey(user.role))}
+                            {roleLabel}
                           </span>
                           {!isAdmin && user.preset && (
                             <span className="mt-1 block text-[11px] text-[var(--muted-foreground)]">
@@ -593,65 +609,47 @@ export default function AdminUsersPage() {
                                 </button>
                               </Tooltip>
                             )}
-                            <Tooltip label={
-                                isSelf
-                                  ? t("Cannot change your own role")
-                                  : user.role === "admin"
-                                    ? t("Demote to user")
-                                    : t("Promote to admin")
-                              } side="top">
-                              <button
-                                onClick={() =>
-                                  setConfirmTarget({
-                                    kind: isAdmin ? "demote" : "promote",
-                                    user,
-                                  })
-                                }
-                                disabled={isSelf}
-                                aria-label={
-                                  isSelf
-                                    ? t("Cannot change your own role")
-                                    : user.role === "admin"
-                                      ? t("Demote to user")
-                                      : t("Promote to admin")
-                                }
-                                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                         hover:bg-[var(--background)] hover:text-[var(--foreground)]
-                                         disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                              >
-                                {user.role === "admin" ? (
-                                  <ShieldOff size={15} />
-                                ) : (
-                                  <Shield size={15} />
-                                )}
-                              </button>
-                            </Tooltip>
-                            <Tooltip label={
-                                isSelf
-                                  ? t("Cannot delete your own account")
-                                  : t("Delete {{username}}", {
-                                      username: user.username,
-                                    })
-                              } side="top">
-                              <button
-                                onClick={() =>
-                                  setConfirmTarget({ kind: "delete", user })
-                                }
-                                disabled={isSelf}
-                                aria-label={
+                            {canAssignRoles && !isSelf && (
+                              <Tooltip label={t("Change role")} side="top">
+                                <button
+                                  onClick={() => setRoleTarget(user)}
+                                  aria-label={t("Change role")}
+                                  className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                                           hover:bg-[var(--background)] hover:text-[var(--foreground)]
+                                           transition-colors"
+                                >
+                                  <UserCog size={15} />
+                                </button>
+                              </Tooltip>
+                            )}
+                            {canWriteUsers && (
+                              <Tooltip label={
                                   isSelf
                                     ? t("Cannot delete your own account")
                                     : t("Delete {{username}}", {
                                         username: user.username,
                                       })
-                                }
-                                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                         hover:bg-red-500/10 hover:text-red-500
-                                         disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                              >
-                                <Trash2 size={15} />
-                              </button>
-                            </Tooltip>
+                                } side="top">
+                                <button
+                                  onClick={() =>
+                                    setConfirmTarget({ kind: "delete", user })
+                                  }
+                                  disabled={isSelf}
+                                  aria-label={
+                                    isSelf
+                                      ? t("Cannot delete your own account")
+                                      : t("Delete {{username}}", {
+                                          username: user.username,
+                                        })
+                                  }
+                                  className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                                           hover:bg-red-500/10 hover:text-red-500
+                                           disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </Tooltip>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -694,28 +692,10 @@ export default function AdminUsersPage() {
 
       <ConfirmDialog
         open={confirmTarget !== null}
-        title={
-          confirmTarget?.kind === "delete"
-            ? t("Delete user")
-            : confirmTarget?.kind === "promote"
-              ? t("Promote to admin")
-              : t("Demote to user")
-        }
-        tone={confirmTarget?.kind === "delete" ? "danger" : "default"}
-        confirmLabel={
-          confirmTarget?.kind === "delete"
-            ? t("Delete user")
-            : confirmTarget?.kind === "promote"
-              ? t("Promote")
-              : t("Demote")
-        }
-        busyLabel={
-          confirmTarget?.kind === "delete"
-            ? t("Deleting…")
-            : confirmTarget?.kind === "promote"
-              ? t("Promoting…")
-              : t("Demoting…")
-        }
+        title={t("Delete user")}
+        tone="danger"
+        confirmLabel={t("Delete user")}
+        busyLabel={t("Deleting…")}
         busy={confirmBusy}
         onConfirm={handleConfirmAction}
         onCancel={() => setConfirmTarget(null)}
@@ -736,24 +716,20 @@ export default function AdminUsersPage() {
                 </p>
                 <p className="text-xs text-[var(--muted-foreground)]">
                   {t("{{role}} · joined {{date}}", {
-                    role: t(accountRoleLabelKey(confirmTarget.user.role)),
+                    role:
+                      confirmTarget.user.role_name ||
+                      (accountRoleLabelKey(confirmTarget.user.role)
+                        ? t(accountRoleLabelKey(confirmTarget.user.role)!)
+                        : confirmTarget.user.role),
                     date: formatDate(confirmTarget.user.created_at, lang),
                   })}
                 </p>
               </div>
             </div>
             <p className="mt-3">
-              {confirmTarget.kind === "delete"
-                ? t(
-                    "This permanently removes the account and its assignments. This cannot be undone.",
-                  )
-                : confirmTarget.kind === "promote"
-                  ? t(
-                      "Admins can manage users and assignments, and work in the shared main workspace.",
-                    )
-                  : t(
-                      "They will lose access to the admin area and switch to their own assigned workspace.",
-                    )}
+              {t(
+                "This permanently removes the account and its assignments. This cannot be undone.",
+              )}
             </p>
           </>
         )}
@@ -1012,6 +988,24 @@ export default function AdminUsersPage() {
           </form>
         </div>
       )}
+
+      <RoleAssignDialog
+        user={roleTarget}
+        roles={roles}
+        onClose={() => setRoleTarget(null)}
+        onAssigned={(role, roleName) => {
+          if (!roleTarget) return;
+          const username = roleTarget.username;
+          setUsers((current) =>
+            current.map((user) =>
+              user.username === username
+                ? { ...user, role, role_name: roleName }
+                : user,
+            ),
+          );
+          setRoleTarget(null);
+        }}
+      />
     </div>
   );
 }

@@ -6,22 +6,33 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-Role = Literal["admin", "teacher", "student", "user"]
+Role = str
 AccountPreset = Literal["standard", "learner", "custom"]
 ScopeKind = Literal["admin", "user"]
 
-#: The single source of truth for valid role values. Every role-bearing
-#: store/validator must accept exactly this set; authorization itself stays
-#: least-privilege — only "admin" elevates.
+#: Built-in roles. Custom roles are validated against the role store instead;
+#: this set remains the seed list and the compatibility contract for the four
+#: roles that always exist.
 VALID_ROLES: frozenset[str] = frozenset({"admin", "teacher", "student", "user"})
 
 
 def normalize_role(value: str, default: str = "user") -> str:
-    """Return ``value`` when it is a legal role, else ``default``.
+    """Return ``value`` when it names a configured role, else ``default``.
 
     Least-privilege degrade: an unknown or corrupted role never keeps or
     gains privileges — it falls back to the given default (usually "user").
+    The role store is consulted lazily so this module stays importable without
+    touching the filesystem at import time.
     """
+    try:
+        from .roles import role_exists
+
+        if role_exists(value):
+            return value
+    except Exception:
+        # A broken role store must not grant an unknown role. Built-ins still
+        # work through the static fallback below.
+        pass
     return value if value in VALID_ROLES else default
 
 

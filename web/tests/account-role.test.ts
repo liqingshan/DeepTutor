@@ -10,6 +10,7 @@ test("all account roles retain distinct display labels", () => {
   assert.equal(accountRoleLabelKey("teacher"), "Teacher");
   assert.equal(accountRoleLabelKey("student"), "Student");
   assert.equal(accountRoleLabelKey("user"), "User");
+  assert.equal(accountRoleLabelKey("moderator"), null);
 
   for (const language of ["en", "zh", "de", "fr", "uk", "pl"]) {
     const labels = JSON.parse(

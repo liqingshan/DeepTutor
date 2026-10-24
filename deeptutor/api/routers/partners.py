@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from deeptutor.api.routers.auth import require_admin
+from deeptutor.api.routers.auth import require_permission
 from deeptutor.app.container import get_application_container
 from deeptutor.multi_user.context import get_current_user
 from deeptutor.multi_user.partner_access import (
@@ -563,7 +563,7 @@ async def list_souls():
     return get_partner_manager().list_souls()
 
 
-@router.post("/souls", dependencies=[Depends(require_admin)])
+@router.post("/souls", dependencies=[Depends(require_permission("admin.resources.write"))])
 async def create_soul(payload: SoulCreateRequest):
     mgr = get_partner_manager()
     # Slug the id server-side (authoritative): soul ids ride in ``/souls/<id>``
@@ -583,7 +583,7 @@ async def get_soul(soul_id: str):
     return soul
 
 
-@router.put("/souls/{soul_id}", dependencies=[Depends(require_admin)])
+@router.put("/souls/{soul_id}", dependencies=[Depends(require_permission("admin.resources.write"))])
 async def update_soul(soul_id: str, payload: SoulTemplateUpdateRequest):
     result = get_partner_manager().update_soul(soul_id, payload.name, payload.content)
     if not result:
@@ -591,7 +591,7 @@ async def update_soul(soul_id: str, payload: SoulTemplateUpdateRequest):
     return result
 
 
-@router.delete("/souls/{soul_id}", dependencies=[Depends(require_admin)])
+@router.delete("/souls/{soul_id}", dependencies=[Depends(require_permission("admin.resources.write"))])
 async def delete_soul(soul_id: str):
     if not get_partner_manager().delete_soul(soul_id):
         raise HTTPException(status_code=404, detail=t("api.soul_not_found"))

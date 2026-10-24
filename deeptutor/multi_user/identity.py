@@ -22,7 +22,7 @@ from .book_permission import (
     public_permission_dict,
 )
 from .learner_profile import normalize_profile
-from .models import VALID_ROLES, AccountPreset, Role, normalize_role
+from .models import AccountPreset, Role, normalize_role
 from .paths import PROJECT_ROOT, SYSTEM_ROOT, migrate_legacy_multi_user_tree
 
 logger = logging.getLogger(__name__)
@@ -315,6 +315,15 @@ def save_user(
     return record
 
 
+def _role_display_name(role: str) -> str:
+    try:
+        from .roles import role_name
+
+        return role_name(role)
+    except Exception:
+        return role
+
+
 def list_user_info(  # nosec B107 - empty defaults mean "no env fallback supplied".
     env_username: str = "",
     env_password_hash: str = "",
@@ -324,6 +333,7 @@ def list_user_info(  # nosec B107 - empty defaults mean "no env fallback supplie
             "id": record.get("id", ""),
             "username": username,
             "role": record.get("role", "user"),
+            "role_name": _role_display_name(str(record.get("role") or "user")),
             "created_at": record.get("created_at", ""),
             "disabled": bool(record.get("disabled", False)),
             "avatar": str(record.get("avatar") or ""),
@@ -513,15 +523,18 @@ def delete_avatar_file(user_id: str) -> None:
 
 
 def set_role(username: str, role: Role) -> bool:
-    if role not in VALID_ROLES:
-        raise ValueError(f"role must be one of {sorted(VALID_ROLES)}")
+    from .roles import role_exists
+
+    if not role_exists(role):
+        raise ValueError(f"Unknown role: {role!r}")
     if not _has_users():
         return False
-    users = load_users()
-    if username not in users:
-        return False
-    users[username]["role"] = role
-    _write_users(users)
+    with _USERS_WRITE_LOCK:
+        users = load_users()
+        if username not in users:
+            return False
+        users[username]["role"] = role
+        _write_users(users)
     return True
 
 

@@ -31,6 +31,7 @@ def mu_isolated_root(tmp_path, monkeypatch) -> Path:
         guardians,
         identity,
         paths,
+        roles,
     )
 
     project_root = tmp_path
@@ -48,6 +49,7 @@ def mu_isolated_root(tmp_path, monkeypatch) -> Path:
     monkeypatch.setattr(identity, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(identity, "SYSTEM_ROOT", system_root)
     monkeypatch.setattr(identity, "AUTH_DIR", system_root / "auth")
+    monkeypatch.setattr(identity, "USERS_DB", system_root / "auth" / "auth.db")
     monkeypatch.setattr(identity, "USERS_FILE", system_root / "auth" / "users.json")
     monkeypatch.setattr(identity, "SECRET_FILE", system_root / "auth" / "auth_secret")
     monkeypatch.setattr(
@@ -63,6 +65,8 @@ def mu_isolated_root(tmp_path, monkeypatch) -> Path:
 
     monkeypatch.setattr(grants, "GRANTS_DIR", system_root / "grants")
     monkeypatch.setattr(guardians, "GUARDIANS_FILE", system_root / "guardians.json")
+    monkeypatch.setattr(roles, "ROLES_FILE", system_root / "roles.json")
+    monkeypatch.setattr(roles, "_CACHE", None)
     monkeypatch.setattr(audit, "SYSTEM_ROOT", system_root)
     monkeypatch.setattr(
         device_credentials,

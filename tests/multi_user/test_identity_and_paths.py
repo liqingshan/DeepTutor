@@ -10,9 +10,10 @@ def test_identity_migrates_legacy_users_with_stable_uid(tmp_path, monkeypatch):
     legacy = tmp_path / "data" / "user" / "auth_users.json"
     legacy.parent.mkdir(parents=True)
     legacy.write_text('{"alice":{"hash":"h1","role":"admin","created_at":"t"},"bob":"h2"}')
-    users_file = tmp_path / "data" / "system" / "auth" / "users.json"
+    users_db = tmp_path / "data" / "system" / "auth" / "auth.db"
 
-    monkeypatch.setattr(identity, "USERS_FILE", users_file)
+    monkeypatch.setattr(identity, "USERS_DB", users_db)
+    monkeypatch.setattr(identity, "AUTH_DIR", users_db.parent)
     monkeypatch.setattr(identity, "LEGACY_USERS_FILE", legacy)
 
     users = identity.load_users()
@@ -20,7 +21,7 @@ def test_identity_migrates_legacy_users_with_stable_uid(tmp_path, monkeypatch):
     assert users["alice"]["id"].startswith("u_")
     assert users["alice"]["role"] == "admin"
     assert users["bob"]["role"] == "user"
-    assert users_file.exists()
+    assert users_db.exists()
 
 
 def test_path_service_uses_current_user_scope(tmp_path, monkeypatch):

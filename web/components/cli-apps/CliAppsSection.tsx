@@ -52,7 +52,9 @@ type Tab = "installed" | "store";
 export default function CliAppsSection() {
   const { t, i18n } = useTranslation();
   const zh = i18n.language?.toLowerCase().startsWith("zh");
-  const { isAdmin, loading: authLoading } = useAuthStatus();
+  const { isAdmin, permissions, loading: authLoading } = useAuthStatus();
+  const canManageApps =
+    isAdmin || Boolean(permissions?.includes("admin.plugins.manage"));
 
   const [state, setState] = useState<CliAppState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -120,7 +122,7 @@ export default function CliAppsSection() {
 
       {tab === "store" ? (
         <Store
-          isAdmin={isAdmin}
+          isAdmin={canManageApps}
           adminKnown={!authLoading}
           onChanged={setState}
         />
@@ -129,7 +131,7 @@ export default function CliAppsSection() {
       ) : (
         <Installed
           state={state}
-          isAdmin={isAdmin}
+          isAdmin={canManageApps}
           zh={zh}
           onChanged={setState}
           onBrowse={() => setTab("store")}

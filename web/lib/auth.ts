@@ -15,6 +15,8 @@ export interface AuthStatus {
   user_id?: string;
   username?: string;
   role?: string;
+  role_name?: string;
+  permissions?: string[];
   is_admin?: boolean;
   /** Server-side account preset; null for identities without a local account. */
   preset?: "standard" | "learner" | "custom" | null;

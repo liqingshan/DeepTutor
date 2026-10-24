@@ -14,16 +14,28 @@ import {
 
 import Modal from "@/components/common/Modal";
 import { useAuthStatus } from "@/hooks/useAuthStatus";
+import { hasPermission } from "@/lib/admin-permissions";
 
 interface AdminNavItem {
   href: string;
   labelKey: string;
+  permission: string;
   icon: LucideIcon;
 }
 
 const ADMIN_NAV: readonly AdminNavItem[] = [
-  { href: "/admin/users", labelKey: "User Management", icon: Users },
-  { href: "/admin/roles", labelKey: "Role Management", icon: ShieldCheck },
+  {
+    href: "/admin/users",
+    labelKey: "User Management",
+    permission: "admin.users.read",
+    icon: Users,
+  },
+  {
+    href: "/admin/roles",
+    labelKey: "Role Management",
+    permission: "admin.roles.read",
+    icon: ShieldCheck,
+  },
 ];
 
 // Brand names are not translated; keeping this out of JSX also keeps the
@@ -34,9 +46,18 @@ function isActivePath(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function AdminNavigation({ onNavigate }: { onNavigate?: () => void }) {
+function AdminNavigation({
+  permissions,
+  onNavigate,
+}: {
+  permissions: readonly string[];
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   const { t } = useTranslation();
+  const items = ADMIN_NAV.filter((item) =>
+    hasPermission(permissions, item.permission),
+  );
 
   return (
     <nav
@@ -48,7 +69,7 @@ function AdminNavigation({ onNavigate }: { onNavigate?: () => void }) {
           {t("Account & permissions")}
         </p>
         <div className="space-y-0.5">
-          {ADMIN_NAV.map((item) => {
+          {items.map((item) => {
             const Icon = item.icon;
             const active = isActivePath(pathname, item.href);
             return (
@@ -78,8 +99,15 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const router = useRouter();
   const pathname = usePathname();
-  const { authenticated, isAdmin, loading } = useAuthStatus();
+  const { authenticated, loading, permissions } = useAuthStatus();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const allowedNav = ADMIN_NAV.filter((item) =>
+    hasPermission(permissions, item.permission),
+  );
+  const currentItem = ADMIN_NAV.find((item) =>
+    isActivePath(pathname, item.href),
+  );
 
   useEffect(() => {
     if (loading) return;
@@ -87,8 +115,22 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       router.replace(`/login?next=${encodeURIComponent(pathname)}`);
       return;
     }
-    if (!isAdmin) router.replace("/");
-  }, [authenticated, isAdmin, loading, pathname, router]);
+    if (allowedNav.length === 0) {
+      router.replace("/");
+      return;
+    }
+    if (!currentItem || !hasPermission(permissions, currentItem.permission)) {
+      router.replace(allowedNav[0].href);
+    }
+  }, [
+    allowedNav,
+    authenticated,
+    currentItem,
+    loading,
+    pathname,
+    permissions,
+    router,
+  ]);
 
   if (loading) {
     return (
@@ -98,18 +140,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!authenticated || !isAdmin) return null;
-
-  const currentItem = ADMIN_NAV.find((item) =>
-    isActivePath(pathname, item.href),
-  );
+  if (!authenticated || allowedNav.length === 0) return null;
 
   return (
     <div className="fixed inset-0 flex h-dvh overflow-hidden bg-[var(--background)]">
       <aside className="hidden w-[248px] shrink-0 flex-col border-r border-border/60 bg-[color-mix(in_srgb,var(--muted)_25%,var(--background))] md:flex">
         <div className="px-4 pb-3 pt-5">
           <Link
-            href="/admin/users"
+            href={allowedNav[0]?.href ?? "/admin/users"}
             className="flex items-center gap-2.5 rounded-lg px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
           >
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--foreground)] text-[var(--background)]">
@@ -125,7 +163,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
         </div>
-        <AdminNavigation />
+        <AdminNavigation permissions={permissions} />
         <div className="border-t border-border/60 p-2.5">
           <Link
             href="/"
@@ -172,7 +210,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         width="sm"
       >
         <div className="flex h-[70dvh] flex-col pt-2">
-          <AdminNavigation onNavigate={() => setMobileOpen(false)} />
+          <AdminNavigation
+            permissions={permissions}
+            onNavigate={() => setMobileOpen(false)}
+          />
           <div className="border-t border-border/60 p-2.5">
             <Link
               href="/"

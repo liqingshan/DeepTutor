@@ -81,10 +81,10 @@ def test_set_role_accepts_new_roles_and_round_trips(seed_user, role):
 def test_corrupted_stored_role_degrades_to_user_on_load(mu_isolated_root):
     from deeptutor.multi_user import identity
 
-    identity.USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    identity.LEGACY_USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     # "bob" is a non-first account, so its canonical default is "user"; the
     # corrupted "superadmin" value must degrade to that, never pass through.
-    identity.USERS_FILE.write_text(
+    identity.LEGACY_USERS_FILE.write_text(
         '{"alice": {"id": "u_a", "hash": "h"},'
         ' "bob": {"id": "u_b", "hash": "h", "role": "superadmin"}}',
         encoding="utf-8",

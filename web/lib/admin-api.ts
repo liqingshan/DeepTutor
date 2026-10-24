@@ -7,6 +7,7 @@ export interface UserRecord {
   id: string;
   username: string;
   role: AccountRole;
+  role_name?: string;
   created_at: string;
   disabled?: boolean;
   /** Avatar marker: "", "icon:<name>:<color>", or "img:<version>". */
@@ -17,6 +18,16 @@ export interface UserRecord {
     default: "none" | "read";
     books: Record<string, "none" | "read" | "edit">;
   };
+}
+
+export interface RoleDefinition {
+  id: string;
+  name: string;
+  description: string;
+  builtin: boolean;
+  permissions: string[];
+  user_count: number;
+  created_at: string;
 }
 
 export interface LearnerProfile {
@@ -144,7 +155,7 @@ export async function deleteUsers(
 export async function setUserRole(
   username: string,
   role: AccountRole,
-): Promise<void> {
+): Promise<{ role: AccountRole; role_name: string }> {
   const res = await apiFetch(
     apiUrl(`/api/auth/users/${encodeURIComponent(username)}/role`),
     {
@@ -157,6 +168,14 @@ export async function setUserRole(
     const data = await res.json().catch(() => ({}));
     throw new Error(data.detail ?? "Failed to update role");
   }
+  const data = (await res.json().catch(() => ({}))) as {
+    role?: AccountRole;
+    role_name?: string;
+  };
+  return {
+    role: data.role ?? role,
+    role_name: data.role_name ?? role,
+  };
 }
 
 export interface CreatedUser {
@@ -189,4 +208,73 @@ export async function createUser(
     throw new Error(message);
   }
   return (await res.json()) as CreatedUser;
+}
+
+export async function listRoles(): Promise<RoleDefinition[]> {
+  const res = await apiFetch(apiUrl("/api/multi-user/roles"));
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof data.detail === "string"
+        ? data.detail
+        : `Failed to fetch roles (${res.status})`,
+    );
+  }
+  const data = (await res.json()) as { roles?: RoleDefinition[] };
+  return data.roles ?? [];
+}
+
+export interface RoleInput {
+  name: string;
+  description: string;
+  permissions: string[];
+}
+
+export async function createRole(input: RoleInput): Promise<RoleDefinition> {
+  const res = await apiFetch(apiUrl("/api/multi-user/roles"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail ?? "Failed to create role");
+  }
+  const data = (await res.json()) as { role: RoleDefinition };
+  return data.role;
+}
+
+export async function updateRole(
+  roleId: string,
+  input: Partial<RoleInput>,
+): Promise<RoleDefinition> {
+  const res = await apiFetch(
+    apiUrl(`/api/multi-user/roles/${encodeURIComponent(roleId)}`),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail ?? "Failed to update role");
+  }
+  const data = (await res.json()) as { role: RoleDefinition };
+  return data.role;
+}
+
+export async function deleteRole(roleId: string): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(`/api/multi-user/roles/${encodeURIComponent(roleId)}`),
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof data.detail === "string"
+        ? data.detail
+        : `Failed to delete role (${res.status})`,
+    );
+  }
 }

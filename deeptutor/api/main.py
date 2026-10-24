@@ -592,16 +592,16 @@ app.include_router(
 # All other routers require a valid session when AUTH_ENABLED=true.
 # require_auth is a no-op when AUTH_ENABLED=false, so this is safe for local use.
 from deeptutor.api.routers.auth import (  # noqa: E402
-    require_admin,
     require_auth,
     require_learning_surface,
+    require_permission,
 )
 
 _auth = [Depends(require_learning_surface)]
 # Partner data is anchored at the admin workspace (data/partners) and shared
 # process-wide, so management is admin-gated in multi-user deployments
 # (single-user local runs are implicitly admin — no behaviour change there).
-_admin = [Depends(require_admin)]
+_admin = [Depends(require_permission("admin.settings.manage"))]
 
 app.include_router(
     multi_user_router,

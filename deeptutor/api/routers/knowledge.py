@@ -37,7 +37,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from deeptutor.api.routers.auth import require_admin
+from deeptutor.api.routers.auth import require_admin, require_permission
 from deeptutor.api.utils.progress_broadcaster import ProgressBroadcaster
 from deeptutor.api.utils.task_id_manager import TaskIDManager
 from deeptutor.api.utils.task_log_stream import capture_task_logs, get_task_stream_manager
@@ -1727,7 +1727,7 @@ async def get_lightrag_model_options() -> dict[str, Any]:
     return model_options()
 
 
-@router.put("/knowledge-bases/rag-pipelines/lightrag/config", dependencies=[Depends(require_admin)])
+@router.put("/knowledge-bases/rag-pipelines/lightrag/config", dependencies=[Depends(require_admin), Depends(require_permission("admin.settings.manage"))])
 async def update_lightrag_pipeline_config(payload: LightRagConfigUpdate):
     """Persist LightRAG's knobs.
 
@@ -2436,7 +2436,7 @@ async def connect_lightrag_server_route(payload: ConnectLightRagServerRequest):
     }
 
 
-@router.post("/knowledge-bases/probe-weknora", dependencies=[Depends(require_admin)])
+@router.post("/knowledge-bases/probe-weknora", dependencies=[Depends(require_admin), Depends(require_permission("admin.settings.manage"))])
 async def probe_weknora_route(payload: ProbeWeKnoraRequest):
     """Validate a WeKnora server and knowledge-base binding without registering."""
     from deeptutor.services.rag.pipelines.weknora.probe import probe_weknora
@@ -2456,7 +2456,7 @@ async def probe_weknora_route(payload: ProbeWeKnoraRequest):
     return result.to_dict()
 
 
-@router.post("/knowledge-bases/connect-weknora", dependencies=[Depends(require_admin)])
+@router.post("/knowledge-bases/connect-weknora", dependencies=[Depends(require_admin), Depends(require_permission("admin.settings.manage"))])
 async def connect_weknora_route(payload: ConnectWeKnoraRequest):
     """Connect a self-hosted WeKnora knowledge base for retrieval only."""
     from deeptutor.services.rag.pipelines.weknora.probe import probe_weknora
@@ -2594,7 +2594,7 @@ class ConnectKiwixRequest(KiwixConnectionRequest):
     name: str
 
 
-@router.get("/knowledge-bases/kiwix-catalog", dependencies=[Depends(require_admin)])
+@router.get("/knowledge-bases/kiwix-catalog", dependencies=[Depends(require_admin), Depends(require_permission("admin.settings.manage"))])
 async def list_kiwix_catalog(
     server_url: str = Query(min_length=1, max_length=2048),
     q: str = Query(default="", max_length=100),
@@ -2611,7 +2611,7 @@ async def list_kiwix_catalog(
     }
 
 
-@router.post("/knowledge-bases/probe-kiwix", dependencies=[Depends(require_admin)])
+@router.post("/knowledge-bases/probe-kiwix", dependencies=[Depends(require_admin), Depends(require_permission("admin.settings.manage"))])
 async def probe_kiwix_route(payload: KiwixConnectionRequest) -> dict[str, Any]:
     """Verify that one archive is readable without copying its ZIM file."""
     from deeptutor.services.rag.pipelines.kiwix.client import KiwixClient, KiwixError
@@ -2624,7 +2624,7 @@ async def probe_kiwix_route(payload: KiwixConnectionRequest) -> dict[str, Any]:
     return {"ok": True, "zim_name": client.zim_name, "title": title}
 
 
-@router.post("/knowledge-bases/connect-kiwix", dependencies=[Depends(require_admin)])
+@router.post("/knowledge-bases/connect-kiwix", dependencies=[Depends(require_admin), Depends(require_permission("admin.settings.manage"))])
 async def connect_kiwix_route(payload: ConnectKiwixRequest) -> dict[str, Any]:
     """Bind a KB to a kiwix-serve archive; no ingest or index is created."""
     from deeptutor.services.rag.pipelines.kiwix.client import KiwixClient, KiwixError

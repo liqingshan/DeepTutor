@@ -446,7 +446,7 @@ export interface paths {
     };
     /**
      * Get Users
-     * @description List all registered users. Requires admin role.
+     * @description List all registered users. Requires read access to accounts.
      */
     readonly get: operations["get_users_api_auth_users_get"];
     readonly put?: never;
@@ -4573,6 +4573,74 @@ export interface paths {
     readonly post?: never;
     /** Revoke My Guardianship */
     readonly delete: operations["revoke_my_guardianship_api_multi_user_me_guardianships__relationship_id__delete"];
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/multi-user/permissions": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /**
+     * List Permissions
+     * @description Return the permission catalog the role editor renders.
+     */
+    readonly get: operations["list_permissions_api_multi_user_permissions_get"];
+    readonly put?: never;
+    readonly post?: never;
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/multi-user/roles": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /**
+     * List Roles
+     * @description List built-in and custom roles with their permission sets.
+     */
+    readonly get: operations["list_roles_api_multi_user_roles_get"];
+    readonly put?: never;
+    /**
+     * Create Custom Role
+     * @description Create a custom role.
+     */
+    readonly post: operations["create_custom_role_api_multi_user_roles_post"];
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/multi-user/roles/{role_id}": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly get?: never;
+    /**
+     * Update Existing Role
+     * @description Rename, describe, or re-permission a role.
+     */
+    readonly put: operations["update_existing_role_api_multi_user_roles__role_id__put"];
+    readonly post?: never;
+    /**
+     * Delete Custom Role
+     * @description Delete an unassigned custom role. Built-ins cannot be deleted.
+     */
+    readonly delete: operations["delete_custom_role_api_multi_user_roles__role_id__delete"];
     readonly options?: never;
     readonly head?: never;
     readonly patch?: never;
@@ -11402,10 +11470,14 @@ export interface components {
       readonly learning_policy?: {
         readonly [key: string]: unknown;
       } | null;
+      /** Permissions */
+      readonly permissions?: readonly string[];
       /** Preset */
       readonly preset?: ("standard" | "learner" | "custom") | null;
       /** Role */
       readonly role?: string | null;
+      /** Role Name */
+      readonly role_name?: string | null;
       /** User Id */
       readonly user_id?: string | null;
       /** Username */
@@ -15267,6 +15339,35 @@ export interface components {
       /** Desired Retention */
       readonly desired_retention: number;
     };
+    /**
+     * RoleCreateRequest
+     * @description Create a custom role; ``id`` is optional and derived from the name.
+     */
+    readonly RoleCreateRequest: {
+      /**
+       * Description
+       * @default
+       */
+      readonly description: string;
+      /** Id */
+      readonly id?: string | null;
+      /** Name */
+      readonly name: string;
+      /** Permissions */
+      readonly permissions?: readonly string[];
+    };
+    /**
+     * RoleUpdateRequest
+     * @description Patch a role. Omitted fields stay unchanged; ``permissions: []`` clears.
+     */
+    readonly RoleUpdateRequest: {
+      /** Description */
+      readonly description?: string | null;
+      /** Name */
+      readonly name?: string | null;
+      /** Permissions */
+      readonly permissions?: readonly string[] | null;
+    };
     /** RoundSummaryRequest */
     readonly RoundSummaryRequest: {
       /** Partner Id */
@@ -16944,6 +17045,11 @@ export interface components {
       readonly preset: "standard" | "learner" | "custom";
       /** Role */
       readonly role: string;
+      /**
+       * Role Name
+       * @default
+       */
+      readonly role_name: string;
       /** Username */
       readonly username: string;
     };
@@ -17635,6 +17741,10 @@ export type SchemaResumeBookRequest =
 export type SchemaReviewRequest = components["schemas"]["ReviewRequest"];
 export type SchemaReviewSettingsRequest =
   components["schemas"]["ReviewSettingsRequest"];
+export type SchemaRoleCreateRequest =
+  components["schemas"]["RoleCreateRequest"];
+export type SchemaRoleUpdateRequest =
+  components["schemas"]["RoleUpdateRequest"];
 export type SchemaRoundSummaryRequest =
   components["schemas"]["RoundSummaryRequest"];
 export type SchemaRunStartRequest = components["schemas"]["RunStartRequest"];
@@ -27432,6 +27542,193 @@ export interface operations {
       };
       readonly path: {
         readonly relationship_id: string;
+      };
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": {
+            readonly [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly list_permissions_api_multi_user_permissions_get: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path?: never;
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": {
+            readonly [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly list_roles_api_multi_user_roles_get: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path?: never;
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": {
+            readonly [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly create_custom_role_api_multi_user_roles_post: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path?: never;
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "application/json": components["schemas"]["RoleCreateRequest"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 201: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": {
+            readonly [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly update_existing_role_api_multi_user_roles__role_id__put: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path: {
+        readonly role_id: string;
+      };
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "application/json": components["schemas"]["RoleUpdateRequest"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": {
+            readonly [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly delete_custom_role_api_multi_user_roles__role_id__delete: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path: {
+        readonly role_id: string;
       };
       readonly cookie?: {
         readonly dt_token?: string | null;

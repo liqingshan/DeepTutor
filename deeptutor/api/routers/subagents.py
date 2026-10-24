@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from deeptutor.api.routers.auth import require_admin
+from deeptutor.api.routers.auth import require_admin, require_permission
 from deeptutor.knowledge.kb_types import SUBAGENT_KB_TYPE
 from deeptutor.multi_user.knowledge_access import account_kb_manager
 from deeptutor.services.rag.linked_kb import assert_path_allowed
@@ -267,7 +267,7 @@ async def get_settings():
     return load_subagent_settings().to_dict()
 
 
-@router.put("/settings", dependencies=[Depends(require_admin)])
+@router.put("/settings", dependencies=[Depends(require_admin), Depends(require_permission("admin.settings.manage"))])
 async def update_settings(payload: SubagentSettingsPayload):
     """Update the subagent settings (admin-gated; deployment-wide)."""
     merged = load_subagent_settings().to_dict()

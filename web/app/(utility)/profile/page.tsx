@@ -200,6 +200,11 @@ export default function ProfilePage() {
         ? null
         : fallback.color;
   const isAdmin = profile?.role === "admin";
+  const roleLabelKey = profile ? accountRoleLabelKey(profile.role) : null;
+  const roleLabel = profile
+    ? profile.role_name ||
+      (roleLabelKey ? t(roleLabelKey) : profile.role)
+    : "";
   const lang: Language = i18n.language?.startsWith("zh") ? "zh" : "en";
   const joinedDate = profile?.created_at ? new Date(profile.created_at) : null;
   const joined =
@@ -256,7 +261,7 @@ export default function ProfilePage() {
                       }`}
                     >
                       {isAdmin && <ShieldCheck size={11} strokeWidth={2} />}
-                      {isAdmin ? t("Administrator") : t(accountRoleLabelKey(profile.role))}
+                      {isAdmin ? t("Administrator") : roleLabel}
                     </span>
                   </div>
                   {joined && (

@@ -1076,7 +1076,11 @@ export function LightRagForm({
 }) {
   const { t } = useTranslation();
   const auth = useAuthStatus();
-  const canEdit = auth.statusAvailable && (!auth.enabled || auth.isAdmin);
+  const canEdit =
+    auth.statusAvailable &&
+    (!auth.enabled ||
+      auth.isAdmin ||
+      Boolean(auth.permissions?.includes("admin.settings.manage")));
   const { form, setLoaded, setForm, saving, setSaving, dirty, patch } =
     useEngineForm<LightRagConfig>(
       () => getLightRagConfig({ force: true }),
@@ -1183,7 +1187,11 @@ export function LightRagModelsForm({
   const { t } = useTranslation();
   const catalog = useLLMOptions(getLightRagModelOptions);
   const auth = useAuthStatus();
-  const canEdit = auth.statusAvailable && (!auth.enabled || auth.isAdmin);
+  const canEdit =
+    auth.statusAvailable &&
+    (!auth.enabled ||
+      auth.isAdmin ||
+      Boolean(auth.permissions?.includes("admin.settings.manage")));
   const { form, setLoaded, setForm, saving, setSaving, dirty, patch } =
     useEngineForm<LightRagConfig>(
       () => getLightRagConfig({ force: true }),

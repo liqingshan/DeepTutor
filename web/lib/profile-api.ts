@@ -38,6 +38,7 @@ export interface ProfileInfo {
   id: string;
   username: string;
   role: AccountRole;
+  role_name?: string;
   created_at: string;
   disabled?: boolean;
   /** Avatar marker: "", "icon:<name>:<color>", or "img:<version>". */

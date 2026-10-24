@@ -13,7 +13,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, StrictBool, field_validator
 
-from deeptutor.api.routers.auth import require_admin, require_auth
+from deeptutor.api.routers.auth import require_auth, require_permission
 from deeptutor.knowledge.manager import KnowledgeBaseManager
 from deeptutor.multi_user.audit import log_admin_action, log_guardian_action
 from deeptutor.multi_user.book_permission import (
@@ -55,6 +55,16 @@ from deeptutor.multi_user.paths import (
     get_admin_path_service,
     get_path_service_for_scope,
     scope_for_user,
+)
+from deeptutor.multi_user.roles import (
+    PERMISSIONS,
+    create_role,
+    delete_role,
+    load_roles,
+    public_role,
+    role_has_permission,
+    role_user_counts,
+    update_role,
 )
 from deeptutor.reading import ReadingStore
 from deeptutor.reading.extensions import get_reading_extension_registry
@@ -147,6 +157,23 @@ class SkillInstallPayload(BaseModel):
     name: str | None = None
     force: bool = False
     allow_unverified: bool = False
+
+
+class RoleCreateRequest(BaseModel):
+    """Create a custom role; ``id`` is optional and derived from the name."""
+
+    id: str | None = Field(default=None, max_length=32)
+    name: str = Field(min_length=1, max_length=64)
+    description: str = Field(default="", max_length=280)
+    permissions: list[str] = Field(default_factory=list)
+
+
+class RoleUpdateRequest(BaseModel):
+    """Patch a role. Omitted fields stay unchanged; ``permissions: []`` clears."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=280)
+    permissions: list[str] | None = None
 
 
 def _admin_catalog_summary() -> dict[str, list[dict[str, Any]]]:
@@ -323,7 +350,11 @@ def _require_guardian_access(
 ) -> tuple[str, dict[str, Any], str, bool]:
     actor_user_id = str(getattr(current, "user_id", "") or "")
     learner_username, learner_record = _require_assignable_user(learner_user_id)
-    is_admin = str(getattr(current, "role", "") or "") == "admin"
+    role = str(getattr(current, "role", "") or "")
+    resource_permission = (
+        "admin.resources.read" if permission == "view_reports" else "admin.resources.write"
+    )
+    is_admin = role_has_permission(role, resource_permission)
     if is_admin:
         return learner_username, learner_record, actor_user_id, True
     _guardian_username, _guardian_record = _require_assignable_user(actor_user_id)
@@ -351,8 +382,106 @@ def _log_supervisor_action(
     )
 
 
+@router.get("/roles")
+async def list_roles(
+    _: object = Depends(require_permission("admin.roles.read", "admin.users.read")),
+) -> dict[str, Any]:
+    """List built-in and custom roles with their permission sets."""
+    counts = role_user_counts()
+    return {
+        "roles": [
+            public_role(role, user_count=counts.get(role["id"], 0))
+            for role in load_roles()
+        ]
+    }
+
+
+@router.get("/permissions")
+async def list_permissions(
+    _: object = Depends(require_permission("admin.roles.read", "admin.users.read")),
+) -> dict[str, Any]:
+    """Return the permission catalog the role editor renders."""
+    return {"permissions": [dict(permission) for permission in PERMISSIONS]}
+
+
+@router.post("/roles", status_code=201)
+async def create_custom_role(
+    payload: RoleCreateRequest,
+    _: object = Depends(require_permission("admin.roles.write")),
+) -> dict[str, Any]:
+    """Create a custom role."""
+    try:
+        role = create_role(
+            name=payload.name,
+            description=payload.description,
+            permissions=payload.permissions,
+            role_id=payload.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log_admin_action(
+        "role_create",
+        summary={
+            "role_id": role["id"],
+            "name": role["name"],
+            "permissions": role["permissions"],
+        },
+    )
+    return {"role": public_role(role)}
+
+
+@router.put("/roles/{role_id}")
+async def update_existing_role(
+    role_id: str,
+    payload: RoleUpdateRequest,
+    _: object = Depends(require_permission("admin.roles.write")),
+) -> dict[str, Any]:
+    """Rename, describe, or re-permission a role."""
+    try:
+        role = update_role(
+            role_id,
+            name=payload.name,
+            description=payload.description,
+            permissions=payload.permissions,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Role not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log_admin_action(
+        "role_update",
+        summary={
+            "role_id": role["id"],
+            "name": role["name"],
+            "permissions": role["permissions"],
+        },
+    )
+    return {"role": public_role(role)}
+
+
+@router.delete("/roles/{role_id}")
+async def delete_custom_role(
+    role_id: str,
+    _: object = Depends(require_permission("admin.roles.write")),
+) -> dict[str, Any]:
+    """Delete an unassigned custom role. Built-ins cannot be deleted."""
+    try:
+        role = delete_role(role_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Role not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    log_admin_action(
+        "role_delete",
+        summary={"role_id": role["id"], "name": role["name"]},
+    )
+    return {"ok": True, "role": public_role(role)}
+
+
 @router.get("/admin/resources")
-async def admin_resources(_: object = Depends(require_admin)) -> dict[str, Any]:
+async def admin_resources(
+    _: object = Depends(require_permission("admin.resources.read")),
+) -> dict[str, Any]:
     """Everything an admin can assign to a user: models, KBs, skills, and
     the tool surface (system tools + MCP tools, same pool partners use)."""
     from deeptutor.api.utils.tool_options import build_tool_options
@@ -373,7 +502,9 @@ async def admin_resources(_: object = Depends(require_admin)) -> dict[str, Any]:
 
 
 @router.get("/admin/books")
-async def admin_books(_: object = Depends(require_admin)) -> dict[str, Any]:
+async def admin_books(
+    _: object = Depends(require_permission("admin.resources.read")),
+) -> dict[str, Any]:
     from deeptutor.multi_user.book_access import admin_book_catalog
 
     return {"books": admin_book_catalog()}
@@ -382,7 +513,7 @@ async def admin_books(_: object = Depends(require_admin)) -> dict[str, Any]:
 @router.get("/guardians")
 async def list_guardian_relationships(
     include_revoked: bool = False,
-    _: object = Depends(require_admin),
+    _: object = Depends(require_permission("admin.resources.read")),
 ) -> dict[str, Any]:
     users = _users_by_id()
     relationships = [
@@ -395,7 +526,7 @@ async def list_guardian_relationships(
 @router.post("/guardians", status_code=201)
 async def authorize_guardian_relationship(
     payload: GuardianAuthorizationPayload,
-    current: object = Depends(require_admin),
+    current: object = Depends(require_permission("admin.resources.write")),
 ) -> dict[str, Any]:
     _require_assignable_user(payload.guardian_user_id)
     _require_assignable_user(payload.learner_user_id)
@@ -427,7 +558,7 @@ async def authorize_guardian_relationship(
 @router.delete("/guardians/{relationship_id}")
 async def revoke_guardian_relationship(
     relationship_id: str,
-    current: object = Depends(require_admin),
+    current: object = Depends(require_permission("admin.resources.write")),
 ) -> dict[str, Any]:
     revoked_by = str(getattr(current, "user_id", "") or "")
     relationship = revoke_guardian(relationship_id, revoked_by=revoked_by)
@@ -771,7 +902,10 @@ async def reset_learner_credentials(
 
 
 @router.get("/users/{user_id}/grants")
-async def get_user_grants(user_id: str, _: object = Depends(require_admin)) -> dict[str, Any]:
+async def get_user_grants(
+    user_id: str,
+    _: object = Depends(require_permission("admin.resources.read")),
+) -> dict[str, Any]:
     _require_assignable_user(user_id)
     return {"grant": load_grant(user_id)}
 
@@ -780,7 +914,7 @@ async def get_user_grants(user_id: str, _: object = Depends(require_admin)) -> d
 async def put_user_grants(
     user_id: str,
     payload: GrantPayload,
-    _: object = Depends(require_admin),
+    _: object = Depends(require_permission("admin.resources.write")),
 ) -> dict[str, Any]:
     user_record = _require_assignable_user(user_id)
     try:
@@ -818,7 +952,7 @@ async def put_user_grants(
 @router.get("/users/{user_id}/book-permission")
 async def get_user_book_permission(
     user_id: str,
-    _: object = Depends(require_admin),
+    _: object = Depends(require_permission("admin.resources.read")),
 ) -> dict[str, Any]:
     from deeptutor.multi_user.book_permission import (
         normalize_book_permission,
@@ -837,7 +971,7 @@ async def get_user_book_permission(
 async def put_user_book_permission(
     user_id: str,
     payload: BookPermissionPayload,
-    _: object = Depends(require_admin),
+    _: object = Depends(require_permission("admin.resources.write")),
 ) -> dict[str, Any]:
     from deeptutor.multi_user.book_access import shared_book_exists
     from deeptutor.multi_user.book_permission import public_permission_dict
@@ -869,7 +1003,7 @@ async def put_user_book_permission(
 @router.post("/admin/skills/install")
 async def admin_install_skill(
     payload: SkillInstallPayload,
-    _: object = Depends(require_admin),
+    _: object = Depends(require_permission("admin.resources.write")),
 ) -> dict[str, Any]:
     """Install a hub skill into the admin catalog (``<hub>:<slug>[@version]``).
 
@@ -924,5 +1058,7 @@ async def admin_install_skill(
 
 
 @router.get("/users")
-async def multi_user_list_users(_: object = Depends(require_admin)) -> dict[str, Any]:
+async def multi_user_list_users(
+    _: object = Depends(require_permission("admin.users.read")),
+) -> dict[str, Any]:
     return {"users": list_user_info()}

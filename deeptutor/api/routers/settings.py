@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 from deeptutor.multi_user.context import get_current_user
 from deeptutor.multi_user.model_access import allowed_llm_options
+from deeptutor.multi_user.roles import role_has_permission
 from deeptutor.services.codebuddy_auth import get_codebuddy_auth_service
 from deeptutor.services.codex_auth import (
     CodexAuthError,
@@ -578,7 +579,7 @@ def patch_ui_settings(**fields: Any) -> None:
 
 
 def _require_settings_admin() -> None:
-    if not get_current_user().is_admin:
+    if not role_has_permission(get_current_user().role, "admin.settings.manage"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Model configuration is managed by an administrator.",
@@ -922,7 +923,7 @@ def _network_settings_payload() -> dict[str, Any]:
 @router.get("")
 async def get_settings():
     user = get_current_user()
-    if not user.is_admin:
+    if not role_has_permission(user.role, "admin.settings.manage"):
         # Non-admins never see the catalog (provider URLs/keys); their model
         # choices come from /settings/llm-options (grant-filtered).
         return {"ui": load_ui_settings()}
@@ -1713,7 +1714,7 @@ async def test_mineru_connection(payload: MinerUSettingsUpdate):
 
 @router.get("/llm-options")
 async def get_llm_options():
-    if not get_current_user().is_admin:
+    if not role_has_permission(get_current_user().role, "admin.settings.manage"):
         return allowed_llm_options()
     return list_llm_options(get_model_catalog_service().load())
 
